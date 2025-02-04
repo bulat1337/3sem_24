@@ -7,6 +7,8 @@
 #include "client.h"
 #include "util.h"
 
+const size_t buf_size = 4096;
+
 const char* register_fifo = "/tmp/server_register_fifo";
 
 int SendToServer(int fd, const char* msg)
@@ -75,32 +77,67 @@ int run_client()
 
 	printf("register fd: %d\n", register_fd);
 
-	const char* tx_path = "/tmp/tx_1";
-	const char* rx_path = "/tmp/rx_1";
-    const char* register_cmd = "REGISTER /tmp/tx_1 /tmp/rx_1";
+	char tx_path[buf_size] = {};
+	char rx_path[buf_size] = {};
 
-	DO(SendToServer, register_fd, register_cmd);
-
-	sleep(1);
-
-	int rxfd = open(rx_path, O_WRONLY);
-	if (rxfd == -1)
+	while (1)
 	{
-        perror("bad register open");
-        return 1;
-    }
+		char buf[buf_size] = {};
+		if (fgets(buf, buf_size, stdin) == NULL)
+		{
+			perror("Failed to read command");
+			return -1;
+		}
 
-	const char* get_cmd = "GET /tmp/file_1";
+		buf[strcspn(buf, "\n")] = '\0';
 
-	DO(SendToServer, rxfd, get_cmd);
+		LOG("scanned msg: %s\n", buf);
 
-	int txfd = open(tx_path, O_RDONLY);
+		char bufcpy[buf_size] = {};
+		strncpy(bufcpy, buf, buf_size);
+		char* cmd = strtok(bufcpy, " ");
 
-	const char* recieved_file = "/tmp/recieved_by_client";
-	receive_file(txfd, recieved_file);
+		LOG("command: %s\n", cmd);
+
+		if (!strncmp(cmd, "REGISTER", buf_size))
+		{
+			MSG("sending REGISTER command to server\n");
+
+			DO(SendToServer, register_fd, buf);
+
+			strcpy(tx_path, strtok(NULL, " "));
+			strcpy(rx_path, strtok(NULL, " "));
+
+			LOG("transit path: %s\n", tx_path);
+			LOG("recieve path: %s\n", rx_path);
+		}
+		else if (!strncmp(cmd, "GET", buf_size))
+		{
+			MSG("sending GET command to server\n");
+
+			int rxfd = open(rx_path, O_WRONLY);
+			if (rxfd == -1)
+			{
+				perror("bad open");
+				return 0;
+			}
+
+			DO(SendToServer, rxfd, buf);
+
+			int txfd = open(tx_path, O_RDONLY);
+
+			const char* recieved_file = "/tmp/recieved_by_client";
+			MSG("recieving file\n");
+			receive_file(txfd, recieved_file);
+		}
+		else
+		{
+			fprintf(stderr, "Invalid command: %s\n", cmd);
+		}
+	}
+
 
     close(register_fd);
-    close(rxfd);
 
 
 	return 0;

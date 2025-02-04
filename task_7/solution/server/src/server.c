@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <pthread.h>
 
 #include "server.h"
 #include "util.h"
@@ -37,7 +38,7 @@ Client handle_register(int register_fd)
 	char* command = strtok(buf, " ");
 
 	LOG("First token: %s\n", command);
-	if (strcmp(command, "REGISTER")) return client;
+	if (strncmp(command, "REGISTER", sizeof("REGISTER"))) return client;
 
 	char* tx_path = strtok(NULL, " ");
 	if (!tx_path) return client;
@@ -105,10 +106,12 @@ int send_file(int txfd, const char* file_path)
     return 0;
 }
 
-int handle_command(Client client)
+void* handle_command(void *arg)
 {
+	Client* client = (Client*)arg;
+
 	char buf[buf_size] = {};
-	int read_bytes = read(client.rxfd, buf, buf_size);
+	int read_bytes = read(client->rxfd, buf, buf_size);
 	LOG("read %d bytes\n", read_bytes);
 
 	buf[buf_size - 1] = '\0';
@@ -118,24 +121,24 @@ int handle_command(Client client)
 	char* command = strtok(buf, " ");
 
 	LOG("command: %s\n", command);
-	if (strcmp(command, "GET"))
+	if (strncmp(command, "GET", sizeof("GET")))
 	{
 		perror("invalid client command");
-		return -1;
+		return NULL;
 	}
 
 	char* file_path = strtok(NULL, " ");
 	if(!file_path)
 	{
 		perror("invalid file_path");
-		return -1;
+		return NULL;
 	}
 
 	LOG("Sending file: %s\n", file_path);
 
-	send_file(client.txfd, file_path);
+	send_file(client->txfd, file_path);
 
-	return 0;
+	return NULL;
 }
 
 int run_server()
@@ -146,7 +149,7 @@ int run_server()
 
 	/// rimeout
 	struct timeval tv;
-	tv.tv_sec = 10;
+	tv.tv_sec = 100;
 	tv.tv_usec = 0;
 
 	/// register FIFO logic
@@ -208,7 +211,11 @@ int run_server()
 				{
 					LOG("Recieved command from %lu client\n", cl_id);
 
-					handle_command(clients[cl_id]);
+					pthread_t thread;
+					pthread_create(&thread, NULL, handle_command, &clients[cl_id]);
+					pthread_detach(thread);
+
+					// handle_command(clients[cl_id]);
 
 					break;
 				}
