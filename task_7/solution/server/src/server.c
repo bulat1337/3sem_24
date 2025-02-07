@@ -21,11 +21,19 @@ const char* register_fifo = "/tmp/server_register_fifo";
 const size_t buf_size = 4096;
 const size_t client_amount = 5;
 
-Client handle_register(int register_fd)
+Client HandleRegister(int register_fd)
 {
 	MSG("Handling register\n");
+
+	Client client = { .rxfd = -1, .txfd = -1};
+
 	char buf[buf_size] = {};
 	int read_bytes = read(register_fd, buf, buf_size);
+	if (read_bytes < 0)
+	{
+		perror("bad_read");
+		return client;
+	}
 	LOG("read %d bytes\n", read_bytes);
 
 	buf[buf_size - 1] = '\0';
@@ -33,16 +41,26 @@ Client handle_register(int register_fd)
 	LOG("Recieved from register FIFO:\n"
 		"%s\n", buf);
 
-	Client client = { .rxfd = -1, .txfd = -1};
-
 	char* command = strtok(buf, " ");
+	if (!command)
+	{
+		perror("bad strtok");
+		return client;
+	}
 
 	LOG("First token: %s\n", command);
-	if (strncmp(command, "REGISTER", sizeof("REGISTER"))) return client;
+	if (strncmp(command, "REGISTER", sizeof("REGISTER")))
+		return client;
 
 	char* tx_path = strtok(NULL, " ");
-	if (!tx_path) return client;
+	if (!tx_path)
+	{
+		perror("bad strtok");
+		return client;
+	}
+
 	LOG("tx_path: %s\n", tx_path);
+
 	unlink(tx_path);
 	if (mkfifo(tx_path, 0666) == -1)
 	{
@@ -52,7 +70,12 @@ Client handle_register(int register_fd)
 	client.txfd = open(tx_path, O_RDWR);
 
 	char* rx_path = strtok(NULL, " ");
-	if (!rx_path) return client;
+	if (!rx_path)
+	{
+		perror("bad strtok");
+		return client;
+	}
+
 	LOG("rx_path: %s\n", rx_path);
 	unlink(rx_path);
 	if (mkfifo(rx_path, 0666) == -1)
@@ -61,12 +84,13 @@ Client handle_register(int register_fd)
 		return client;
 	}
 	client.rxfd = open(rx_path, O_RDWR);
+
 	LOG("New clinets rxfd: %d\n", client.rxfd);
 
 	return client;
 }
 
-int send_file(int txfd, const char* file_path)
+int SendFile(int txfd, const char* file_path)
 {
     const size_t buf_size = 4096;
     char buf[buf_size];
@@ -74,7 +98,7 @@ int send_file(int txfd, const char* file_path)
     int file_fd = open(file_path, O_RDONLY);
     if (file_fd == -1)
     {
-        perror("Failed to open file");
+        perror("bad open");
         return -1;
     }
 
@@ -87,7 +111,7 @@ int send_file(int txfd, const char* file_path)
             ssize_t res = write(txfd, buf + written_bytes, read_bytes - written_bytes);
             if (res == -1)
             {
-                perror("Failed to write to FIFO");
+                perror("bad write");
                 close(file_fd);
                 return -1;
             }
@@ -97,7 +121,7 @@ int send_file(int txfd, const char* file_path)
 
     if (read_bytes == -1)
     {
-        perror("Failed to read from file");
+        perror("bad read");
         close(file_fd);
         return -1;
     }
@@ -106,7 +130,7 @@ int send_file(int txfd, const char* file_path)
     return 0;
 }
 
-void* handle_command(void *arg)
+void* HandleCommand(void *arg)
 {
 	Client* client = (Client*)arg;
 
@@ -119,24 +143,29 @@ void* handle_command(void *arg)
 	LOG("Read buffer: %s\n", buf);
 
 	char* command = strtok(buf, " ");
+	if (!command)
+	{
+		perror("bad strtok");
+		return NULL;
+	}
 
 	LOG("command: %s\n", command);
 	if (strncmp(command, "GET", sizeof("GET")))
 	{
-		perror("invalid client command");
+		perror("bad strncmp");
 		return NULL;
 	}
 
 	char* file_path = strtok(NULL, " ");
 	if(!file_path)
 	{
-		perror("invalid file_path");
+		perror("bad strtok");
 		return NULL;
 	}
 
 	LOG("Sending file: %s\n", file_path);
 
-	send_file(client->txfd, file_path);
+	SendFile(client->txfd, file_path);
 
 	return NULL;
 }
@@ -163,8 +192,6 @@ int run_server()
 		return 0;
 	}
 	LOG("register_fd: %d\n", register_fd);
-	///
-
 
 	Client clients[client_amount] = {};
 	size_t client_amount = 0;
@@ -193,7 +220,7 @@ int run_server()
 
 			if (FD_ISSET(register_fd, &rfds))
 			{
-				clients[client_amount] = handle_register(register_fd);
+				clients[client_amount] = HandleRegister(register_fd);
 				if (clients[client_amount].txfd == -1 || clients[client_amount].rxfd == -1)
 				{
 					perror("bad register");
@@ -212,10 +239,10 @@ int run_server()
 					LOG("Recieved command from %lu client\n", cl_id);
 
 					pthread_t thread;
-					pthread_create(&thread, NULL, handle_command, &clients[cl_id]);
+					pthread_create(&thread, NULL, HandleCommand, &clients[cl_id]);
 					pthread_detach(thread);
 
-					// handle_command(clients[cl_id]);
+					// HandleCommand(clients[cl_id]);
 
 					break;
 				}

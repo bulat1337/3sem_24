@@ -20,12 +20,12 @@ int SendToServer(int fd, const char* msg)
 		return -1;
 	}
 
-	printf ("write %lu bytes\n", write_bytes);
+	LOG("write %lu bytes\n", write_bytes);
 
 	return 0;
 }
 
-int receive_file(int rxfd, const char* file_path)
+int RecieveFile(int rxfd, const char* file_path)
 {
     const size_t buf_size = 4096;
     char buf[buf_size];
@@ -37,7 +37,7 @@ int receive_file(int rxfd, const char* file_path)
         return -1;
     }
 
-    ssize_t read_bytes;
+    ssize_t read_bytes = 0;
     while ((read_bytes = read(rxfd, buf, buf_size)) > 0)
     {
         ssize_t written_bytes = 0;
@@ -46,7 +46,7 @@ int receive_file(int rxfd, const char* file_path)
             ssize_t res = write(file_fd, buf + written_bytes, read_bytes - written_bytes);
             if (res == -1)
             {
-                perror("Failed to write to file");
+                perror("bad write");
                 close(file_fd);
                 return -1;
             }
@@ -56,7 +56,7 @@ int receive_file(int rxfd, const char* file_path)
 
     if (read_bytes == -1)
     {
-        perror("Failed to read from FIFO");
+        perror("bad read");
         close(file_fd);
         return -1;
     }
@@ -68,14 +68,13 @@ int receive_file(int rxfd, const char* file_path)
 int run_client()
 {
 	int register_fd = open(register_fifo, O_WRONLY);
-
     if (register_fd == -1)
 	{
         perror("bad register open");
         return 1;
     }
 
-	printf("register fd: %d\n", register_fd);
+	LOG("register fd: %d\n", register_fd);
 
 	char tx_path[buf_size] = {};
 	char rx_path[buf_size] = {};
@@ -125,10 +124,15 @@ int run_client()
 			DO(SendToServer, rxfd, buf);
 
 			int txfd = open(tx_path, O_RDONLY);
+			if (txfd == -1)
+			{
+				perror("bad open");
+				return -1;
+			}
 
 			const char* recieved_file = "/tmp/recieved_by_client";
 			MSG("recieving file\n");
-			receive_file(txfd, recieved_file);
+			RecieveFile(txfd, recieved_file);
 		}
 		else
 		{
